@@ -2,8 +2,14 @@
 
 #define INPUT_PIN  2
 
-volatile unsigned long edge_t_us[2];
-volatile int edge_i = 0;
+unsigned long start;
+unsigned long stop;
+volatile int rising = 0;
+volatile int falling = 0;
+
+bool get_falling_edge = true;
+
+bool compute_speed = false;
 
 void interupt(void);
 
@@ -11,30 +17,59 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(INPUT_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, FALLING);
 }
 
 void loop() {
-  if (edge_i == 1) {
-    detachInterrupt(digitalPinToInterrupt(INPUT_PIN));
+  if (falling) {
+    get_falling_edge = false;
+    detachInterrupt(digitalPinToInterrupt(INPUT));
+    Serial.println("!");
+    start = micros();
+    falling = 0;
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, RISING);
+  }
 
-    unsigned long t = edge_t_us[1] - edge_t_us[0];
+  if (rising) {
+    detachInterrupt(digitalPinToInterrupt(INPUT));
+    stop = micros();
+    rising = 0;
+    compute_speed = true;
+  }
 
-    Serial.print(F("t0: "));
-    Serial.print(edge_t_us[0]);
-    Serial.print(F("us t1: "));
-    Serial.print(edge_t_us[1]);
-    Serial.print(F("us td: "));
-    Serial.print(t);
-    Serial.println(F("us"));
+  if (compute_speed) {
+    detachInterrupt(digitalPinToInterrupt(INPUT));
+    unsigned long t_us = stop - start;
+    float t_sec = t_us / (1e6);
+    float t_inverse = 1.0 / (t_sec);
 
-    edge_i = 0;
+    Serial.print(F("Start: "));
+    Serial.print(start);
+    Serial.print(F("us \nStop: "));
+    Serial.print(stop);
+    Serial.print(F("us \nt: "));
+    Serial.print(t_us);
+    Serial.print(F("us ("));
+    Serial.print(t_sec);
+    Serial.println(F(" seconds)"));
+    Serial.print(F("1/"));
+    Serial.println(t_inverse);
 
-    attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, CHANGE);
+    compute_speed = false;
+    start = 0;
+    stop = 0;
+
+    get_falling_edge = true;
+    attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, FALLING);
   }
 }
 
 void interupt(void) {
-  edge_t_us[edge_i] = micros();
-  edge_i++;
+  if(get_falling_edge) {
+    falling = 1;
+    rising = 0;
+  } else {
+    rising = 1;
+    falling = 0;
+  }
 }
