@@ -1,74 +1,101 @@
 #include <Arduino.h>
 
-#define INPUT_PIN  2
+#define SHUTTER_SENSOR_PIN  2
+#define SERIAL_BAUD         115200
 
-unsigned long start;
-unsigned long stop;
-volatile int rising = 0;
-volatile int falling = 0;
+/* User Typedef -------------------------------------------------------------- */
+typedef enum __edge_t {
+  NO_EDGE,
+  FALLING_EDGE,
+  RISING_EDGE,
+  CALC_EDGE,
+} edge_t;
 
-bool get_falling_edge = true;
+typedef struct __shutterSpeed_handle_t {
+  unsigned long start;
+  unsigned long stop;
+  edge_t edge;
+  edge_t edge_to_detect;
+  unsigned long duration_us;
+  double duration_sec;
+  double speed;
+} ShutterSpeed_Handle_t;
 
-bool compute_speed = false;
+/* Global Variables ---------------------------------------------------------- */
+ShutterSpeed_Handle_t shutter;
 
-void interupt(void);
+/* Function Prototypes ------------------------------------------------------- */ 
+void shutter_isr(void);
+void shutter_init(ShutterSpeed_Handle_t *shutter);
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
 
-  pinMode(INPUT_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, FALLING);
-}
+  shutter_init(&shutter);               /* initialize shutter variable */
+
+  pinMode(SHUTTER_SENSOR_PIN, INPUT);   /* shutter sensor pin is input */
+
+  attachInterrupt(digitalPinToInterrupt(SHUTTER_SENSOR_PIN), shutter_isr, FALLING);
+} // end setup()
 
 void loop() {
-  if (falling) {
-    get_falling_edge = false;
-    detachInterrupt(digitalPinToInterrupt(INPUT));
-    start = micros();
-    falling = 0;
-    attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, RISING);
+  switch (shutter.edge) {
+    case FALLING_EDGE:
+      detachInterrupt(digitalPinToInterrupt(SHUTTER_SENSOR_PIN));
+      shutter.edge = NO_EDGE;
+      shutter.edge_to_detect = RISING_EDGE;
+      shutter.start = micros();
+      attachInterrupt(digitalPinToInterrupt(SHUTTER_SENSOR_PIN), shutter_isr, RISING);
+      break;
+    case RISING_EDGE:
+      detachInterrupt(digitalPinToInterrupt(SHUTTER_SENSOR_PIN));
+      shutter.edge = CALC_EDGE;
+      shutter.stop = micros();
+      
+      break;
+    case CALC_EDGE:
+      shutter.duration_us = shutter.stop - shutter.start;
+      shutter.duration_sec = shutter.duration_us / 1e6;
+      shutter.speed = 1 / shutter.duration_sec;
+
+      Serial.print(F("Start: "));
+      Serial.print(shutter.start);
+      Serial.print(F("us \nStop: "));
+      Serial.print(shutter.stop);
+      Serial.print(F("us \nDuration: "));
+      Serial.print(shutter.duration_us);
+      Serial.print(F("us \nSpeed: 1/"));
+      Serial.println(shutter.speed);
+      Serial.println();
+
+      shutter_init(&shutter);               /* reset shutter variable */
+
+      attachInterrupt(digitalPinToInterrupt(SHUTTER_SENSOR_PIN), shutter_isr, FALLING);
+
+      break;
+    
+    case NO_EDGE:
+
+      break;
+
+    default:
+      shutter.edge = NO_EDGE;
+      break;
   }
 
-  if (rising) {
-    detachInterrupt(digitalPinToInterrupt(INPUT));
-    stop = micros();
-    rising = 0;
-    compute_speed = true;
-  }
+} // end loop()
 
-  if (compute_speed) {
-    detachInterrupt(digitalPinToInterrupt(INPUT));
-    unsigned long t_us = stop - start;
-    float t_sec = t_us / (1e6);
-    float t_inverse = 1.0 / (t_sec);
+void shutter_isr(void) {
+  shutter.edge = shutter.edge_to_detect;
+} // end shutter_isr()
 
-    Serial.print(F("Start: "));
-    Serial.print(start);
-    Serial.print(F("us \nStop: "));
-    Serial.print(stop);
-    Serial.print(F("us \nt: "));
-    Serial.print(t_us);
-    Serial.print(F("us ("));
-    Serial.print(t_sec);
-    Serial.println(F(" seconds)"));
-    Serial.print(F("1/"));
-    Serial.println(t_inverse);
-
-    compute_speed = false;
-    start = 0;
-    stop = 0;
-
-    get_falling_edge = true;
-    attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, FALLING);
-  }
-}
-
-void interupt(void) {
-  if(get_falling_edge) {
-    falling = 1;
-    rising = 0;
-  } else {
-    rising = 1;
-    falling = 0;
-  }
-}
+/* Set/Reset ShutterSpeed_Handle --------------------------------------------- */
+void shutter_init(ShutterSpeed_Handle_t *shutter) {
+  shutter->start = 0;
+  shutter->stop = 0;
+  shutter->duration_us = 0;
+  shutter->duration_sec = 0;
+  shutter->speed = 0;
+  shutter->edge = NO_EDGE;
+  shutter->edge_to_detect = FALLING_EDGE;
+} // end shutter_init()
