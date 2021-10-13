@@ -24,7 +24,6 @@ void loop() {
   if (falling) {
     get_falling_edge = false;
     detachInterrupt(digitalPinToInterrupt(INPUT));
-    Serial.println("!");
     start = micros();
     falling = 0;
     attachInterrupt(digitalPinToInterrupt(INPUT_PIN), interupt, RISING);
